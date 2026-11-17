@@ -91,9 +91,14 @@ pub enum Face {
     Semibold,
     /// Counts, timestamps and the boot screen's console lines.
     Mono,
+    /// The fallback for characters the Latin faces have no glyph for: the Simplified Chinese
+    /// subset in [`horizon_theme::fonts::CJK_REGULAR`].
+    Cjk,
 }
 struct Fonts {
     faces: [FontRef<'static>; 4],
+    /// The characters the Latin faces above lack (Simplified Chinese).
+    cjk: FontRef<'static>,
 }
 impl Fonts {
     fn load() -> Self {
@@ -105,10 +110,26 @@ impl Fonts {
                 f(horizon_theme::fonts::GEIST_SEMIBOLD),
                 f(horizon_theme::fonts::GEIST_MONO),
             ],
+            cjk: f(horizon_theme::fonts::CJK_REGULAR),
         }
     }
     fn face(&self, f: Face) -> &FontRef<'static> {
-        &self.faces[f as usize]
+        match f {
+            Face::Cjk => &self.cjk,
+            _ => &self.faces[f as usize],
+        }
+    }
+    /// The face that has `ch`, and its glyph: the Latin face's, or the Chinese fallback's where
+    /// the Latin face has none.
+    fn pick(&self, f: Face, ch: char) -> (Face, ab_glyph::GlyphId) {
+        let id = self.face(f).glyph_id(ch);
+        if id.0 == 0 {
+            let id = self.cjk.glyph_id(ch);
+            if id.0 != 0 {
+                return (Face::Cjk, id);
+            }
+        }
+        (f, id)
     }
     /// The ab_glyph scale for an em size in pixels.
     fn scale(&self, f: Face, px: f32) -> PxScale {
@@ -469,17 +490,20 @@ impl<'a> Ui<'a> {
     pub fn measure(&self, face: Face, size: f32, text: &str) -> f32 {
         let px = (size * self.density * 4.0).round() / 4.0;
         with_cache(self.atlas, |c| {
-            let font = c.fonts.face(face);
-            let scaled = font.as_scaled(c.fonts.scale(face, px));
+            let main = c.fonts.face(face).as_scaled(c.fonts.scale(face, px));
+            let cjk = c.fonts.cjk.as_scaled(c.fonts.scale(Face::Cjk, px));
             let mut w = 0.0;
-            let mut prev = None;
+            let mut prev: Option<(Face, ab_glyph::GlyphId)> = None;
             for ch in text.chars() {
-                let id = font.glyph_id(ch);
-                if let Some(p) = prev {
-                    w += scaled.kern(p, id);
+                let (f, id) = c.fonts.pick(face, ch);
+                let scaled = if f == Face::Cjk { &cjk } else { &main };
+                if let Some((pf, p)) = prev {
+                    if pf == f {
+                        w += scaled.kern(p, id);
+                    }
                 }
                 w += scaled.h_advance(id);
-                prev = Some(id);
+                prev = Some((f, id));
             }
             w / self.density
         })
@@ -512,23 +536,23 @@ impl<'a> Ui<'a> {
             };
             let baseline = y0 + ((box_px - (ascent - descent)) / 2.0 + ascent).round();
             let mut pen = x0;
-            let mut prev = None;
+            let mut prev: Option<(Face, ab_glyph::GlyphId)> = None;
             for ch in text.chars() {
-                let (id, advance, kern) = {
-                    let font = c.fonts.face(face);
-                    let id = font.glyph_id(ch);
-                    let f = font.as_scaled(scale);
-                    (id, f.h_advance(id), prev.map_or(0.0, |p| f.kern(p, id)))
+                let (piece, id) = c.fonts.pick(face, ch);
+                let f = c.fonts.face(piece).as_scaled(c.fonts.scale(piece, px));
+                let kern = match prev {
+                    Some((pf, p)) if pf == piece => f.kern(p, id),
+                    _ => 0.0,
                 };
                 pen += kern;
                 if real && !ch.is_whitespace() {
-                    let g = c.glyph(atlas, face, id, px);
+                    let g = c.glyph(atlas, piece, id, px);
                     if let Some(rect) = g.rect {
                         quads.push(((pen + g.left).round(), baseline + g.top, rect));
                     }
                 }
-                pen += advance;
-                prev = Some(id);
+                pen += f.h_advance(id);
+                prev = Some((piece, id));
             }
             (pen - x0) / density
         });
