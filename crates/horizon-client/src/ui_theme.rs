@@ -539,10 +539,14 @@ impl<'a> Ui<'a> {
             let mut prev: Option<(Face, ab_glyph::GlyphId)> = None;
             for ch in text.chars() {
                 let (piece, id) = c.fonts.pick(face, ch);
-                let f = c.fonts.face(piece).as_scaled(c.fonts.scale(piece, px));
-                let kern = match prev {
-                    Some((pf, p)) if pf == piece => f.kern(p, id),
-                    _ => 0.0,
+                // The face is borrowed only here: `c.glyph` below needs it mutably.
+                let (advance, kern) = {
+                    let scaled = c.fonts.face(piece).as_scaled(c.fonts.scale(piece, px));
+                    let kern = match prev {
+                        Some((pf, p)) if pf == piece => scaled.kern(p, id),
+                        _ => 0.0,
+                    };
+                    (scaled.h_advance(id), kern)
                 };
                 pen += kern;
                 if real && !ch.is_whitespace() {
@@ -551,7 +555,7 @@ impl<'a> Ui<'a> {
                         quads.push(((pen + g.left).round(), baseline + g.top, rect));
                     }
                 }
-                pen += f.h_advance(id);
+                pen += advance;
                 prev = Some((piece, id));
             }
             (pen - x0) / density
