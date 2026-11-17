@@ -41,6 +41,10 @@ pub mod fonts {
         include_bytes!("../fonts/BricolageGrotesqueDisplay-SemiBold.ttf");
     pub const BRICOLAGE_HEADING_SEMIBOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueHeading-SemiBold.ttf");
+    /// The fallback for what the Latin faces above have no glyph for: a Noto Sans SC subset with
+    /// the characters the Simplified Chinese interface asks for (SIL OFL 1.1,
+    /// `fonts/OFL-NotoSansSC.txt`).
+    pub const CJK_REGULAR: &[u8] = include_bytes!("../fonts/NotoSansSC-Regular-subset.ttf");
 }
 
 /// The glass look's icons: Hugeicons' free set (MIT, `icons/glass/LICENSE-hugeicons.txt`), the
